@@ -1,0 +1,64 @@
+name: Test Pull Request
+
+on:
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'Dockerfile'
+      - 'build.sh'
+      - '.github/workflows/**'
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Test build script
+        run: |
+          chmod +x ./build.sh
+
+          # Test help output
+          ./build.sh --help
+
+          # Test tag generation
+          tag=$(./build.sh --get-tag)
+          echo "Generated tag: $tag"
+
+          # Test dry run
+          ./build.sh --dry-run
+
+      - name: Build test image (ARM only for faster feedback)
+        run: |
+          chmod +x ./build.sh
+          export TOOLCHAINS="arm-zephyr-eabi"
+          ./build.sh --ci
+
+      - name: Test image functionality
+        run: |
+          IMAGE_TAG=$(./build.sh --get-tag)
+          echo "Testing image: ${IMAGE_TAG}"
+
+          # Basic functionality tests
+          docker run --rm "${IMAGE_TAG}" west --version
+          docker run --rm "${IMAGE_TAG}" cmake --version
+          docker run --rm "${IMAGE_TAG}" python3 --version
+
+          # Test GCC availability
+          echo "Checking GCC installation..."
+          docker run --rm "${IMAGE_TAG}" gcc --version
+
+          # Test Zephyr SDK installation
+          echo "Checking Zephyr SDK installation..."
+          docker run --rm "${IMAGE_TAG}" ls -la /home/zephyr/zephyr-sdk
+          docker run --rm "${IMAGE_TAG}" test -f /home/zephyr/zephyr-sdk/setup.sh
+
+          # Test ARM toolchain availability
+          echo "Checking ARM toolchain..."
+          docker run --rm "${IMAGE_TAG}" ls -la /home/zephyr/zephyr-sdk/arm-zephyr-eabi
+          docker run --rm "${IMAGE_TAG}" /home/zephyr/zephyr-sdk/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc --version
