@@ -1,0 +1,228 @@
+name: Build and Publish Zephyr Docker Images
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      zephyr_version:
+        description: 'Zephyr version to build'
+        required: false
+        default: 'v4.2.0'
+        type: string
+      toolchain_version:
+        description: 'Toolchain version to build'
+        required: false
+        default: '0.17.4'
+        type: string
+      debian_version:
+        description: 'Debian base version'
+        required: false
+        default: 'trixie-slim'
+        type: string
+      toolchains:
+        description: 'Toolchains to build (comma-separated or "all")'
+        required: false
+        default: 'arm-zephyr-eabi'
+        type: string
+      push_images:
+        description: 'Push images to registry'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Set build matrix
+        id: set-matrix
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual trigger - use provided inputs
+            TOOLCHAINS="${{ github.event.inputs.toolchains }}"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            # Tag build - build comprehensive matrix
+            TOOLCHAINS="arm-zephyr-eabi,riscv64-zephyr-elf"
+          else
+            # PR or regular push - build only ARM for faster feedback
+            TOOLCHAINS="arm-zephyr-eabi"
+          fi
+
+          echo "Event name: ${{ github.event_name }}"
+          echo "Ref type: ${{ github.ref_type }}"
+          echo "Selected toolchains: $TOOLCHAINS"
+
+          # Convert to JSON array - compact format for GitHub Actions
+          MATRIX=$(echo "$TOOLCHAINS" | jq -R -c 'split(",") | map({toolchain: .})')
+          echo "Generated matrix: $MATRIX"
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+
+  build-and-publish:
+    needs: build-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.build-matrix.outputs.matrix) }}
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Log in to Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set build environment
+        run: |
+          # Set versions from inputs or defaults
+          echo "ZEPHYR_VERSION=${{ github.event.inputs.zephyr_version || 'v4.2.0' }}" >> $GITHUB_ENV
+          echo "TOOLCHAIN_VERSION=${{ github.event.inputs.toolchain_version || '0.17.4' }}" >> $GITHUB_ENV
+          echo "DEBIAN_VERSION=${{ github.event.inputs.debian_version || 'trixie-slim' }}" >> $GITHUB_ENV
+          echo "TOOLCHAINS=${{ matrix.toolchain }}" >> $GITHUB_ENV
+
+          # Determine if we should push
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "PUSH_IMAGES=false" >> $GITHUB_ENV
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "PUSH_IMAGES=${{ github.event.inputs.push_images }}" >> $GITHUB_ENV
+          else
+            echo "PUSH_IMAGES=true" >> $GITHUB_ENV
+          fi
+
+      - name: Generate image metadata
+        id: meta
+        run: |
+          # Generate base image name
+          BASE_NAME="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+
+          # Generate tag based on toolchain
+          if [ "${{ matrix.toolchain }}" = "all" ]; then
+            TAG_SUFFIX="latest"
+          else
+            TAG_SUFFIX=$(echo "${{ matrix.toolchain }}" | sed 's/-zephyr-eabi//g' | sed 's/-zephyr-elf//g')
+          fi
+
+          # Generate full tags
+          TAGS="${BASE_NAME}:${TAG_SUFFIX}"
+
+          # Add version tags for releases
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
+            TAGS="${TAGS},${BASE_NAME}:${TAG_SUFFIX}-${VERSION}"
+            if [ "${{ matrix.toolchain }}" = "all" ]; then
+              TAGS="${TAGS},${BASE_NAME}:${VERSION}"
+            fi
+          fi
+
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "image-name=${BASE_NAME}:${TAG_SUFFIX}" >> $GITHUB_OUTPUT
+
+      - name: Build Docker image
+        run: |
+          echo "🏗️ Building image: ${{ steps.meta.outputs.image-name }}"
+
+          # Use build script for consistency
+          chmod +x ./build.sh
+
+          # Set registry prefix for the build script (without trailing colon)
+          export REGISTRY_PREFIX="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+
+          # Build image
+          ./build.sh --ci
+
+      - name: Test Docker image
+        run: |
+          # Use the same registry prefix to get the correct tag
+          export REGISTRY_PREFIX="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          IMAGE_TAG=$(./build.sh --get-tag)
+          echo "🧪 Testing image: ${IMAGE_TAG}"
+
+          # Basic functionality tests
+          docker run --rm "${IMAGE_TAG}" west --version
+          docker run --rm "${IMAGE_TAG}" cmake --version
+          docker run --rm "${IMAGE_TAG}" python3 --version
+          
+          # Test GCC availability
+          echo "Checking GCC installation..."
+          docker run --rm "${IMAGE_TAG}" gcc --version
+          
+          # Test Zephyr SDK installation
+          echo "Checking Zephyr SDK installation..."
+          docker run --rm "${IMAGE_TAG}" ls -la /home/zephyr/zephyr-sdk
+          docker run --rm "${IMAGE_TAG}" test -f /home/zephyr/zephyr-sdk/setup.sh
+          
+          # Test ARM toolchain availability
+          echo "Checking ARM toolchain..."
+          docker run --rm "${IMAGE_TAG}" ls -la /home/zephyr/zephyr-sdk/arm-zephyr-eabi
+          docker run --rm "${IMAGE_TAG}" /home/zephyr/zephyr-sdk/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc --version
+
+      - name: Push Docker image
+        if: env.PUSH_IMAGES == 'true'
+        run: |
+          # Use the same registry prefix to get the correct tag
+          export REGISTRY_PREFIX="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          IMAGE_TAG=$(./build.sh --get-tag)
+
+          # Tag and push all variants
+          IFS=',' read -ra TAG_ARRAY <<< "${{ steps.meta.outputs.tags }}"
+          for tag in "${TAG_ARRAY[@]}"; do
+            echo "🏷️ Tagging: ${IMAGE_TAG} -> ${tag}"
+            docker tag "${IMAGE_TAG}" "${tag}"
+            echo "📤 Pushing: ${tag}"
+            docker push "${tag}"
+          done
+
+      - name: Output image information
+        run: |
+          # Use the same registry prefix to get the correct tag
+          export REGISTRY_PREFIX="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          IMAGE_TAG=$(./build.sh --get-tag)
+          echo "✅ Successfully built: ${IMAGE_TAG}"
+          echo "📊 Image size: $(docker images "${IMAGE_TAG}" --format 'table {{.Size}}')"
+
+          if [ "${{ env.PUSH_IMAGES }}" = "true" ]; then
+            echo "📤 Published tags:"
+            IFS=',' read -ra TAG_ARRAY <<< "${{ steps.meta.outputs.tags }}"
+            for tag in "${TAG_ARRAY[@]}"; do
+              echo "  - ${tag}"
+            done
+          fi
+
+  cleanup:
+    if: always()
+    needs: [build-and-publish]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cleanup old packages
+        if: github.event_name != 'pull_request'
+        uses: actions/delete-package-versions@v4
+        with:
+          package-name: 'zephyr_docker'
+          package-type: 'container'
+          min-versions-to-keep: 10
+          delete-only-untagged-versions: true
+        continue-on-error: true

@@ -1,0 +1,70 @@
+# Documentation (include basic docs but exclude detailed ones)
+*.md
+docs/
+LICENSE
+
+# Git
+.git/
+.gitignore
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Build artifacts and cache
+build/
+.cache/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.coverage
+
+# Node.js (if present)
+node_modules/
+npm-debug.log*
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+.temp/
+
+# Local project directories (keep out of image)
+projects/
+workspace/
+examples/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+Jenkinsfile
+
+# Scripts (not needed in image)
+build.sh
+docker-compose.yml
+.dockerignore
+
+# Keep only essential files for build context
+!Dockerfile
