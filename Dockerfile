@@ -73,33 +73,43 @@ ARG TOOLCHAINS
 USER zephyr
 WORKDIR /home/zephyr
 
-# Create Python virtual environment as zephyr user
-RUN python3 -m venv ~/.venv
+# Create Python virtual environment and install dependencies in one layer
+RUN python3 -m venv ~/.venv && \
+    ~/.venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    ~/.venv/bin/pip install --no-cache-dir west && \
+    # Clean pip cache immediately
+    ~/.venv/bin/pip cache purge
 
-# Install Python dependencies
-RUN ~/.venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
-	&& ~/.venv/bin/pip install --no-cache-dir west
-
-# Initialize Zephyr workspace with shallow clone for efficiency
+# Initialize Zephyr workspace, install SDK, and cleanup in one layer to minimize disk usage
 ENV PATH="/home/zephyr/.venv/bin:${PATH}"
-RUN west init -m https://github.com/zephyrproject-rtos/zephyr --mr ${ZEPHYR_VERSION}  -o=--depth=1 zephyrproject \
-    && cd zephyrproject \
-	&& west update \
-	&& west zephyr-export \
-	&& west packages pip --install
-
-# Install Zephyr SDK using west (as zephyr user)
-RUN cd /home/zephyr/zephyrproject && \
-	west sdk install --version ${TOOLCHAIN_VERSION} --install-dir /home/zephyr/zephyr-sdk --toolchains ${TOOLCHAINS} -H
-
-# Aggressive cleanup - remove everything except the minimal SDK
-RUN rm -rf /home/zephyr/zephyrproject && \
-	cd /home/zephyr/zephyr-sdk && \
-	find . -name "share/doc" -type d -exec rm -rf {} + 2>/dev/null || true && \
-	find . -name "share/man" -type d -exec rm -rf {} + 2>/dev/null || true && \
-	find . -name "share/info" -type d -exec rm -rf {} + 2>/dev/null || true && \
-	find . -name "*.html" -delete 2>/dev/null || true && \
-	find . -name "*.pdf" -delete 2>/dev/null || true
+RUN set -ex && \
+    # Initialize workspace with shallow clone
+    west init -m https://github.com/zephyrproject-rtos/zephyr --mr ${ZEPHYR_VERSION} -o=--depth=1 zephyrproject && \
+    cd zephyrproject && \
+    west update && \
+    west zephyr-export && \
+    west packages pip --install && \
+    # Install Zephyr SDK
+    west sdk install --version ${TOOLCHAIN_VERSION} --install-dir /home/zephyr/zephyr-sdk --toolchains ${TOOLCHAINS} -H && \
+    # Immediately cleanup the workspace to save space
+    cd /home/zephyr && \
+    rm -rf zephyrproject && \
+    # Aggressive SDK cleanup
+    cd /home/zephyr/zephyr-sdk && \
+    find . -name "share/doc" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find . -name "share/man" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find . -name "share/info" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find . -name "*.html" -delete 2>/dev/null || true && \
+    find . -name "*.pdf" -delete 2>/dev/null || true && \
+    find . -name "*.md" -delete 2>/dev/null || true && \
+    find . -name "*.txt" -delete 2>/dev/null || true && \
+    # Remove debug symbols and static libraries we don't need
+    find . -name "*.a" ! -name "lib*.a" -delete 2>/dev/null || true && \
+    find . -name "*.debug" -delete 2>/dev/null || true && \
+    # Clean Python cache
+    find /home/zephyr/.venv -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find /home/zephyr/.venv -name "*.pyc" -delete 2>/dev/null || true && \
+    find /home/zephyr/.venv -name "*.pyo" -delete 2>/dev/null || true
 
 # Production stage - minimal runtime
 FROM base AS production
@@ -109,32 +119,24 @@ ARG ZEPHYR_VERSION
 ARG TOOLCHAIN_VERSION
 ARG TOOLCHAINS
 
+# Create non-root user and copy files in combined operation
+RUN groupadd -r zephyr && useradd -r -g zephyr -d /home/zephyr -s /bin/bash zephyr && \
+    mkdir -p /home/zephyr && \
+    chown -R zephyr:zephyr /home/zephyr
+
 # Copy only essential files from builder
 COPY --from=builder --chown=zephyr:zephyr /home/zephyr/.venv /home/zephyr/.venv
 COPY --from=builder --chown=zephyr:zephyr /home/zephyr/zephyr-sdk /home/zephyr/zephyr-sdk
 
-# Create non-root user in production
-RUN groupadd -r zephyr && useradd -r -g zephyr -d /home/zephyr -s /bin/bash zephyr \
-	&& mkdir -p /home/zephyr \
-	&& chown -R zephyr:zephyr /home/zephyr
-
-# Switch to non-root user
-USER zephyr
-WORKDIR /home/zephyr
-
-# Clean up Python cache and unnecessary files
-RUN find /home/zephyr/.venv -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true && \
-	find /home/zephyr/.venv -name "*.pyc" -delete 2>/dev/null || true && \
-	find /home/zephyr/.venv -name "*.pyo" -delete 2>/dev/null || true
-
-# Create workspace directory
-RUN mkdir -p /home/zephyr/workspace
-
 # Copy entrypoint script
 COPY --chown=zephyr:zephyr scripts/entrypoint.sh /home/zephyr/entrypoint.sh
 
-# Make script executable
-RUN chmod +x /home/zephyr/entrypoint.sh
+# Switch to non-root user and setup environment in one layer
+USER zephyr
+WORKDIR /home/zephyr
+
+RUN chmod +x /home/zephyr/entrypoint.sh && \
+    mkdir -p /home/zephyr/workspace
 
 # Set environment variables
 ENV PATH="/home/zephyr/.venv/bin:${PATH}" \

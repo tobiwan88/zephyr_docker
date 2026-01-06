@@ -83,10 +83,41 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Free disk space
+        run: |
+          echo "Before cleanup:"
+          df -h
+
+          # Remove unnecessary packages and files
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+
+          # Clean apt cache
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+
+          # Clean docker system
+          docker system prune -af
+
+          echo "After cleanup:"
+          df -h
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
           platforms: linux/amd64,linux/arm64
+          driver-opts: |
+            image=moby/buildkit:v0.12.3
+            network=host
+          config-inline: |
+            [worker.oci]
+              max-parallelism = 1
+            [worker.containerd]
+              max-parallelism = 1
 
       - name: Log in to Container Registry
         if: github.event_name != 'pull_request'
@@ -99,7 +130,7 @@ jobs:
       - name: Set build environment
         run: |
           # Set versions from inputs or defaults
-          echo "ZEPHYR_VERSION=${{ github.event.inputs.zephyr_version || 'v4.2.0' }}" >> $GITHUB_ENV
+          echo "ZEPHYR_VERSION=${{ github.event.inputs.zephyr_version || 'v4.3.0' }}" >> $GITHUB_ENV
           echo "TOOLCHAIN_VERSION=${{ github.event.inputs.toolchain_version || '0.17.4' }}" >> $GITHUB_ENV
           echo "DEBIAN_VERSION=${{ github.event.inputs.debian_version || 'trixie-slim' }}" >> $GITHUB_ENV
           echo "TOOLCHAINS=${{ matrix.toolchain }}" >> $GITHUB_ENV
@@ -145,14 +176,29 @@ jobs:
         run: |
           echo "🏗️ Building image: ${{ steps.meta.outputs.image-name }}"
 
-          # Use build script for consistency
+          # Monitor disk space during build
+          echo "Disk space before build:"
+          df -h
+
+          # Use build script for consistency with CI optimizations
           chmod +x ./build.sh
 
           # Set registry prefix for the build script (without trailing colon)
           export REGISTRY_PREFIX="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
 
-          # Build image
+          # Enable BuildKit optimizations for CI
+          export DOCKER_BUILDKIT=1
+          export BUILDKIT_PROGRESS=plain
+
+          # Build image with reduced parallelism and cache optimization
           ./build.sh --ci
+
+          echo "Disk space after build:"
+          df -h
+
+          # Clean up build cache to free space
+          docker builder prune -f --filter type=exec.cachemount
+          docker builder prune -f --filter type=regular
 
       - name: Test Docker image
         run: |

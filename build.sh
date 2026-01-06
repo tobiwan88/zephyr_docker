@@ -60,7 +60,7 @@ EOF
 # Function to generate smart image tag based on toolchains
 generate_image_tag() {
     local toolchains="$1"
-    
+
     # Handle registry prefix properly
     if [ -n "$REGISTRY_PREFIX" ]; then
         local base_tag="$REGISTRY_PREFIX"
@@ -98,7 +98,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --ci)
             CI_MODE=true
-            BUILD_ARGS="$BUILD_ARGS --progress=plain"
+            BUILD_ARGS="$BUILD_ARGS --progress=plain --no-cache"
+            # CI-specific optimizations for disk space
+            export DOCKER_BUILDKIT=1
+            export BUILDKIT_PROGRESS=plain
             shift
             ;;
         --get-tag)
@@ -166,18 +169,40 @@ fi
 # Build the Docker image
 if [ "$CI_MODE" = "true" ]; then
     echo "🏗️ [CI] Starting Docker build..."
+
+    # Monitor disk space in CI
+    echo "📊 Disk space before build:"
+    df -h | head -2
+
+    # CI-optimized build with reduced parallelism and better cache management
+    docker buildx build $BUILD_ARGS \
+        --load \
+        --build-arg DEBIAN_VERSION="$DEBIAN_VERSION" \
+        --build-arg ZEPHYR_VERSION="$ZEPHYR_VERSION" \
+        --build-arg TOOLCHAIN_VERSION="$TOOLCHAIN_VERSION" \
+        --build-arg TOOLCHAINS="$TOOLCHAINS" \
+        --tag "$IMAGE_TAG" \
+        "$BUILD_CONTEXT"
+
+    # Clean up build cache after successful build in CI
+    if [ $? -eq 0 ]; then
+        echo "🧹 Cleaning up build cache..."
+        docker builder prune -f --filter type=exec.cachemount 2>/dev/null || true
+        docker builder prune -f --filter type=regular 2>/dev/null || true
+        echo "📊 Disk space after cleanup:"
+        df -h | head -2
+    fi
 else
     echo "ℹ [INFO] Starting Docker build..."
+    docker buildx build $BUILD_ARGS \
+        --load \
+        --build-arg DEBIAN_VERSION="$DEBIAN_VERSION" \
+        --build-arg ZEPHYR_VERSION="$ZEPHYR_VERSION" \
+        --build-arg TOOLCHAIN_VERSION="$TOOLCHAIN_VERSION" \
+        --build-arg TOOLCHAINS="$TOOLCHAINS" \
+        --tag "$IMAGE_TAG" \
+        "$BUILD_CONTEXT"
 fi
-
-docker buildx build $BUILD_ARGS \
-    --load \
-    --build-arg DEBIAN_VERSION="$DEBIAN_VERSION" \
-    --build-arg ZEPHYR_VERSION="$ZEPHYR_VERSION" \
-    --build-arg TOOLCHAIN_VERSION="$TOOLCHAIN_VERSION" \
-    --build-arg TOOLCHAINS="$TOOLCHAINS" \
-    --tag "$IMAGE_TAG" \
-    "$BUILD_CONTEXT"
 
 if [ $? -eq 0 ]; then
     if [ "$CI_MODE" = "true" ]; then
