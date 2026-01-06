@@ -11,7 +11,7 @@ on:
       zephyr_version:
         description: 'Zephyr version to build'
         required: false
-        default: 'v4.2.0'
+        default: 'v4.3.0'
         type: string
       toolchain_version:
         description: 'Toolchain version to build'
@@ -165,16 +165,16 @@ jobs:
           docker run --rm "${IMAGE_TAG}" west --version
           docker run --rm "${IMAGE_TAG}" cmake --version
           docker run --rm "${IMAGE_TAG}" python3 --version
-          
+
           # Test GCC availability
           echo "Checking GCC installation..."
           docker run --rm "${IMAGE_TAG}" gcc --version
-          
+
           # Test Zephyr SDK installation
           echo "Checking Zephyr SDK installation..."
           docker run --rm "${IMAGE_TAG}" ls -la /home/zephyr/zephyr-sdk
           docker run --rm "${IMAGE_TAG}" test -f /home/zephyr/zephyr-sdk/setup.sh
-          
+
           # Test ARM toolchain availability
           echo "Checking ARM toolchain..."
           docker run --rm "${IMAGE_TAG}" ls -la /home/zephyr/zephyr-sdk/arm-zephyr-eabi
