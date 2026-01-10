@@ -155,8 +155,13 @@ echo
 # Dry run - show what would be built
 if [ "${DRY_RUN:-false}" = "true" ]; then
     echo "🔍 [DRY RUN] Would execute:"
-    echo "docker buildx build $BUILD_ARGS \\"
-    echo "  --load \\"
+    if [ -n "${PLATFORMS:-}" ]; then
+        echo "docker buildx build $BUILD_ARGS \\"
+        echo "  --push \\"
+    else
+        echo "docker buildx build $BUILD_ARGS \\"
+        echo "  --load \\"
+    fi
     echo "  --build-arg DEBIAN_VERSION=$DEBIAN_VERSION \\"
     echo "  --build-arg ZEPHYR_VERSION=$ZEPHYR_VERSION \\"
     echo "  --build-arg TOOLCHAIN_VERSION=$TOOLCHAIN_VERSION \\"
@@ -175,14 +180,28 @@ if [ "$CI_MODE" = "true" ]; then
     df -h | head -2
 
     # CI-optimized build with reduced parallelism and better cache management
-    docker buildx build $BUILD_ARGS \
-        --load \
-        --build-arg DEBIAN_VERSION="$DEBIAN_VERSION" \
-        --build-arg ZEPHYR_VERSION="$ZEPHYR_VERSION" \
-        --build-arg TOOLCHAIN_VERSION="$TOOLCHAIN_VERSION" \
-        --build-arg TOOLCHAINS="$TOOLCHAINS" \
-        --tag "$IMAGE_TAG" \
-        "$BUILD_CONTEXT"
+    # Use --push for multi-platform builds, --load for single platform
+    if [ -n "${PLATFORMS:-}" ]; then
+        echo "🌐 Building multi-platform image for: $PLATFORMS"
+        docker buildx build $BUILD_ARGS \
+            --push \
+            --build-arg DEBIAN_VERSION="$DEBIAN_VERSION" \
+            --build-arg ZEPHYR_VERSION="$ZEPHYR_VERSION" \
+            --build-arg TOOLCHAIN_VERSION="$TOOLCHAIN_VERSION" \
+            --build-arg TOOLCHAINS="$TOOLCHAINS" \
+            --tag "$IMAGE_TAG" \
+            "$BUILD_CONTEXT"
+    else
+        echo "🏗️ Building single-platform image"
+        docker buildx build $BUILD_ARGS \
+            --load \
+            --build-arg DEBIAN_VERSION="$DEBIAN_VERSION" \
+            --build-arg ZEPHYR_VERSION="$ZEPHYR_VERSION" \
+            --build-arg TOOLCHAIN_VERSION="$TOOLCHAIN_VERSION" \
+            --build-arg TOOLCHAINS="$TOOLCHAINS" \
+            --tag "$IMAGE_TAG" \
+            "$BUILD_CONTEXT"
+    fi
 
     # Clean up build cache after successful build in CI
     if [ $? -eq 0 ]; then
@@ -194,14 +213,28 @@ if [ "$CI_MODE" = "true" ]; then
     fi
 else
     echo "ℹ [INFO] Starting Docker build..."
-    docker buildx build $BUILD_ARGS \
-        --load \
-        --build-arg DEBIAN_VERSION="$DEBIAN_VERSION" \
-        --build-arg ZEPHYR_VERSION="$ZEPHYR_VERSION" \
-        --build-arg TOOLCHAIN_VERSION="$TOOLCHAIN_VERSION" \
-        --build-arg TOOLCHAINS="$TOOLCHAINS" \
-        --tag "$IMAGE_TAG" \
-        "$BUILD_CONTEXT"
+    # Use --push for multi-platform builds, --load for single platform
+    if [ -n "${PLATFORMS:-}" ]; then
+        echo "🌐 Building multi-platform image for: $PLATFORMS"
+        echo "⚠️  Multi-platform builds will be pushed directly to registry"
+        docker buildx build $BUILD_ARGS \
+            --push \
+            --build-arg DEBIAN_VERSION="$DEBIAN_VERSION" \
+            --build-arg ZEPHYR_VERSION="$ZEPHYR_VERSION" \
+            --build-arg TOOLCHAIN_VERSION="$TOOLCHAIN_VERSION" \
+            --build-arg TOOLCHAINS="$TOOLCHAINS" \
+            --tag "$IMAGE_TAG" \
+            "$BUILD_CONTEXT"
+    else
+        docker buildx build $BUILD_ARGS \
+            --load \
+            --build-arg DEBIAN_VERSION="$DEBIAN_VERSION" \
+            --build-arg ZEPHYR_VERSION="$ZEPHYR_VERSION" \
+            --build-arg TOOLCHAIN_VERSION="$TOOLCHAIN_VERSION" \
+            --build-arg TOOLCHAINS="$TOOLCHAINS" \
+            --tag "$IMAGE_TAG" \
+            "$BUILD_CONTEXT"
+    fi
 fi
 
 if [ $? -eq 0 ]; then

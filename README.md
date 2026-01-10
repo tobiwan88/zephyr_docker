@@ -43,8 +43,8 @@ docker pull ghcr.io/tobiwan88/zephyr_docker:arm-riscv64
 
 - **SDK Integration** - Zephyr SDK v0.17.4 with selective toolchain installation
 - **Security** - Non-root user and minimal package set
-- **Multi-Platform** - Support for linux/amd64 and linux/arm64
-- **CI/CD Ready** - Works with GitHub Actions and automated workflows
+- **Multi-Platform** - Support for linux/amd64 and linux/arm64 (fixed in CI/CD pipeline)
+- **CI/CD Ready** - Works with GitHub Actions and automated workflows with multi-platform builds
 - **Development Tools** - West tool and Python environment included
 - **Size Optimized** - Selective toolchain installation and build optimization
 
