@@ -4,7 +4,7 @@
 # Efficient multi-stage build with shallow cloning and selective toolchains
 
 ARG DEBIAN_VERSION=trixie-slim
-ARG ZEPHYR_VERSION=v4.2.0
+ARG ZEPHYR_VERSION=v4.3.0
 ARG TOOLCHAIN_VERSION=0.17.4
 ARG TOOLCHAINS=arm-zephyr-eabi
 
