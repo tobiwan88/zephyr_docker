@@ -106,18 +106,11 @@ jobs:
           echo "After cleanup:"
           df -h
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        with:
-          platforms: linux/amd64,linux/arm64
-          driver-opts: |
-            image=moby/buildkit:v0.12.3
-            network=host
-          config-inline: |
-            [worker.oci]
-              max-parallelism = 1
-            [worker.containerd]
-              max-parallelism = 1
 
       - name: Log in to Container Registry
         if: github.event_name != 'pull_request'
@@ -128,135 +121,75 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set build environment
+        id: vars
         run: |
-          # Set versions from inputs or defaults
-          echo "ZEPHYR_VERSION=${{ github.event.inputs.zephyr_version || 'v4.3.0' }}" >> $GITHUB_ENV
-          echo "TOOLCHAIN_VERSION=${{ github.event.inputs.toolchain_version || '0.17.4' }}" >> $GITHUB_ENV
-          echo "DEBIAN_VERSION=${{ github.event.inputs.debian_version || 'trixie-slim' }}" >> $GITHUB_ENV
-          echo "TOOLCHAINS=${{ matrix.toolchain }}" >> $GITHUB_ENV
+          ZEPHYR_VERSION="${{ github.event.inputs.zephyr_version || 'v4.3.0' }}"
+          TOOLCHAIN_VERSION="${{ github.event.inputs.toolchain_version || '0.17.4' }}"
+          DEBIAN_VERSION="${{ github.event.inputs.debian_version || 'trixie-slim' }}"
+          TOOLCHAINS="${{ matrix.toolchain }}"
 
-          # Determine if we should push
+          # Short suffix used in all tags: arm | riscv64 | ...
+          TAG_SUFFIX=$(echo "${TOOLCHAINS}" | sed 's/-zephyr-eabi//g' | sed 's/-zephyr-elf//g')
+
+          echo "zephyr_version=${ZEPHYR_VERSION}"       >> $GITHUB_OUTPUT
+          echo "toolchain_version=${TOOLCHAIN_VERSION}" >> $GITHUB_OUTPUT
+          echo "debian_version=${DEBIAN_VERSION}"       >> $GITHUB_OUTPUT
+          echo "toolchains=${TOOLCHAINS}"               >> $GITHUB_OUTPUT
+          echo "tag_suffix=${TAG_SUFFIX}"               >> $GITHUB_OUTPUT
+
+          # Determine target platforms
+          if [ "${{ github.ref_type }}" = "tag" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "platforms=linux/amd64,linux/arm64" >> $GITHUB_OUTPUT
+          else
+            # PR / branch push: native platform only for speed
+            echo "platforms=linux/amd64" >> $GITHUB_OUTPUT
+          fi
+
+          # Determine whether to push
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "PUSH_IMAGES=false" >> $GITHUB_ENV
+            echo "push=false" >> $GITHUB_OUTPUT
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "PUSH_IMAGES=${{ github.event.inputs.push_images }}" >> $GITHUB_ENV
+            echo "push=${{ github.event.inputs.push_images }}" >> $GITHUB_OUTPUT
           else
-            echo "PUSH_IMAGES=true" >> $GITHUB_ENV
+            echo "push=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Generate image metadata
+      - name: Generate image tags
         id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # Always publish :arm / :riscv64 (mutable "latest for this toolchain")
+            type=raw,value=${{ steps.vars.outputs.tag_suffix }}
+            # On a git tag also publish :arm-v1.2.3 / :riscv64-v1.2.3 (immutable)
+            type=raw,value=${{ steps.vars.outputs.tag_suffix }}-${{ github.ref_name }},enable=${{ github.ref_type == 'tag' }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ steps.vars.outputs.platforms }}
+          push: ${{ steps.vars.outputs.push }}
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            DEBIAN_VERSION=${{ steps.vars.outputs.debian_version }}
+            ZEPHYR_VERSION=${{ steps.vars.outputs.zephyr_version }}
+            TOOLCHAIN_VERSION=${{ steps.vars.outputs.toolchain_version }}
+            TOOLCHAINS=${{ steps.vars.outputs.toolchains }}
+          cache-from: type=gha,scope=${{ matrix.toolchain }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.toolchain }}
+
+      - name: Smoke-test image (amd64 only)
+        if: steps.vars.outputs.push == 'true'
         run: |
-          # Generate base image name
-          BASE_NAME="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-
-          # Generate tag based on toolchain
-          if [ "${{ matrix.toolchain }}" = "all" ]; then
-            TAG_SUFFIX="latest"
-          else
-            TAG_SUFFIX=$(echo "${{ matrix.toolchain }}" | sed 's/-zephyr-eabi//g' | sed 's/-zephyr-elf//g')
-          fi
-
-          # Generate full tags
-          TAGS="${BASE_NAME}:${TAG_SUFFIX}"
-
-          # Add version tags for releases
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
-            TAGS="${TAGS},${BASE_NAME}:${TAG_SUFFIX}-${VERSION}"
-            if [ "${{ matrix.toolchain }}" = "all" ]; then
-              TAGS="${TAGS},${BASE_NAME}:${VERSION}"
-            fi
-          fi
-
-          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
-          echo "image-name=${BASE_NAME}:${TAG_SUFFIX}" >> $GITHUB_OUTPUT
-
-      - name: Build Docker image
-        run: |
-          echo "🏗️ Building image: ${{ steps.meta.outputs.image-name }}"
-
-          # Monitor disk space during build
-          echo "Disk space before build:"
-          df -h
-
-          # Use build script for consistency with CI optimizations
-          chmod +x ./build.sh
-
-          # Set registry prefix for the build script (without trailing colon)
-          export REGISTRY_PREFIX="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-
-          # Enable BuildKit optimizations for CI
-          export DOCKER_BUILDKIT=1
-          export BUILDKIT_PROGRESS=plain
-
-          # Build image with reduced parallelism and cache optimization
-          ./build.sh --ci
-
-          echo "Disk space after build:"
-          df -h
-
-          # Clean up build cache to free space
-          docker builder prune -f --filter type=exec.cachemount
-          docker builder prune -f --filter type=regular
-
-      - name: Test Docker image
-        run: |
-          # Use the same registry prefix to get the correct tag
-          export REGISTRY_PREFIX="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-          IMAGE_TAG=$(./build.sh --get-tag)
-          echo "🧪 Testing image: ${IMAGE_TAG}"
-
-          # Basic functionality tests
-          docker run --rm "${IMAGE_TAG}" west --version
-          docker run --rm "${IMAGE_TAG}" cmake --version
-          docker run --rm "${IMAGE_TAG}" python3 --version
-
-          # Test GCC availability
-          echo "Checking GCC installation..."
-          docker run --rm "${IMAGE_TAG}" gcc --version
-
-          # Test Zephyr SDK installation
-          echo "Checking Zephyr SDK installation..."
-          docker run --rm "${IMAGE_TAG}" ls -la /home/zephyr/zephyr-sdk
-          docker run --rm "${IMAGE_TAG}" test -f /home/zephyr/zephyr-sdk/setup.sh
-
-          # Test ARM toolchain availability
-          echo "Checking ARM toolchain..."
-          docker run --rm "${IMAGE_TAG}" ls -la /home/zephyr/zephyr-sdk/arm-zephyr-eabi
-          docker run --rm "${IMAGE_TAG}" /home/zephyr/zephyr-sdk/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc --version
-
-      - name: Push Docker image
-        if: env.PUSH_IMAGES == 'true'
-        run: |
-          # Use the same registry prefix to get the correct tag
-          export REGISTRY_PREFIX="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-          IMAGE_TAG=$(./build.sh --get-tag)
-
-          # Tag and push all variants
-          IFS=',' read -ra TAG_ARRAY <<< "${{ steps.meta.outputs.tags }}"
-          for tag in "${TAG_ARRAY[@]}"; do
-            echo "🏷️ Tagging: ${IMAGE_TAG} -> ${tag}"
-            docker tag "${IMAGE_TAG}" "${tag}"
-            echo "📤 Pushing: ${tag}"
-            docker push "${tag}"
-          done
-
-      - name: Output image information
-        run: |
-          # Use the same registry prefix to get the correct tag
-          export REGISTRY_PREFIX="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-          IMAGE_TAG=$(./build.sh --get-tag)
-          echo "✅ Successfully built: ${IMAGE_TAG}"
-          echo "📊 Image size: $(docker images "${IMAGE_TAG}" --format 'table {{.Size}}')"
-
-          if [ "${{ env.PUSH_IMAGES }}" = "true" ]; then
-            echo "📤 Published tags:"
-            IFS=',' read -ra TAG_ARRAY <<< "${{ steps.meta.outputs.tags }}"
-            for tag in "${TAG_ARRAY[@]}"; do
-              echo "  - ${tag}"
-            done
-          fi
+          BASE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          IMAGE="${BASE}:${{ steps.vars.outputs.tag_suffix }}"
+          echo "Testing ${IMAGE} ..."
+          docker pull --platform linux/amd64 "${IMAGE}"
+          docker run --rm --platform linux/amd64 "${IMAGE}" west --version
+          docker run --rm --platform linux/amd64 "${IMAGE}" cmake --version
+          docker run --rm --platform linux/amd64 "${IMAGE}" python3 --version
 
   cleanup:
     if: always()
