@@ -90,7 +90,7 @@ RUN set -ex && \
     west zephyr-export && \
     west packages pip --install && \
     # Install Zephyr SDK
-    west sdk install --version ${TOOLCHAIN_VERSION} --install-dir /home/zephyr/zephyr-sdk --toolchains ${TOOLCHAINS} -H && \
+    west sdk install --version ${TOOLCHAIN_VERSION} --install-dir /home/zephyr/zephyr-sdk --gnu-toolchains ${TOOLCHAINS} -H && \
     # Immediately cleanup the workspace to save space
     cd /home/zephyr && \
     rm -rf zephyrproject && \

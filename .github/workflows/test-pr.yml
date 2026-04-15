@@ -60,5 +60,5 @@ jobs:
 
           # Test ARM toolchain availability
           echo "Checking ARM toolchain..."
-          docker run --rm "${IMAGE_TAG}" ls -la /home/zephyr/zephyr-sdk/arm-zephyr-eabi
-          docker run --rm "${IMAGE_TAG}" /home/zephyr/zephyr-sdk/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc --version
+          docker run --rm "${IMAGE_TAG}" ls -la /home/zephyr/zephyr-sdk/gnu/arm-zephyr-eabi
+          docker run --rm "${IMAGE_TAG}" /home/zephyr/zephyr-sdk/gnu/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc --version
