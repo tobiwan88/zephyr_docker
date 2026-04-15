@@ -7,8 +7,8 @@ set -euo pipefail
 
 # Default configuration (can be overridden via environment variables)
 DEBIAN_VERSION="${DEBIAN_VERSION:-trixie-slim}"
-ZEPHYR_VERSION="${ZEPHYR_VERSION:-v4.2.0}"
-TOOLCHAIN_VERSION="${TOOLCHAIN_VERSION:-0.17.4}"
+ZEPHYR_VERSION="${ZEPHYR_VERSION:-v4.4.0}"
+TOOLCHAIN_VERSION="${TOOLCHAIN_VERSION:-1.0.1}"
 TOOLCHAINS="${TOOLCHAINS:-arm-zephyr-eabi}"
 REGISTRY_PREFIX="${REGISTRY_PREFIX:-}"
 BUILD_ARGS=""
@@ -24,8 +24,8 @@ Usage: $0 [OPTIONS]
 
 Environment Variables:
   DEBIAN_VERSION     Debian base version (default: trixie-slim)
-  ZEPHYR_VERSION     Zephyr RTOS version (default: v4.2.0)
-  TOOLCHAIN_VERSION  Zephyr SDK version (default: 0.17.4)
+  ZEPHYR_VERSION     Zephyr RTOS version (default: v4.4.0)
+  TOOLCHAIN_VERSION  Zephyr SDK version (default: 1.0.1)
   TOOLCHAINS         Comma-separated toolchains or 'all' (default: arm-zephyr-eabi)
   REGISTRY_PREFIX    Container registry prefix (default: none)
 
@@ -40,7 +40,7 @@ Examples:
   TOOLCHAINS="all" $0
 
   # Custom versions
-  ZEPHYR_VERSION="v4.1.0" TOOLCHAIN_VERSION="0.16.8" $0
+  ZEPHYR_VERSION="v4.4.0" TOOLCHAIN_VERSION="1.0.1" $0
 
   # Build for registry
   REGISTRY_PREFIX="ghcr.io/username/repo-name" $0

@@ -14,7 +14,7 @@ This custom container offers several advantages over official alternatives like 
 
 ## �🚀 Latest Versions
 
-- **Zephyr SDK v0.17.4** - Current SDK version
+- **Zephyr SDK v1.0.1** - Current SDK version
 - **Debian Trixie Slim** - Base image
 - **Multi-platform** - AMD64 and ARM64 support
 - **Size optimization**
@@ -41,7 +41,7 @@ docker pull ghcr.io/tobiwan88/zephyr_docker:arm-riscv64
 
 ## ✨ Key Features
 
-- **SDK Integration** - Zephyr SDK v0.17.4 with selective toolchain installation
+- **SDK Integration** - Zephyr SDK v1.0.1 with selective toolchain installation
 - **Security** - Non-root user and minimal package set
 - **Multi-Platform** - Support for linux/amd64 and linux/arm64
 - **CI/CD Ready** - Works with GitHub Actions and automated workflows
@@ -53,8 +53,8 @@ docker pull ghcr.io/tobiwan88/zephyr_docker:arm-riscv64
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `DEBIAN_VERSION` | `trixie-slim` | Debian base image version |
-| `ZEPHYR_VERSION` | `v4.2.0` | Zephyr version for SDK compatibility |
-| `TOOLCHAIN_VERSION` | `0.17.4` | Zephyr SDK version |
+| `ZEPHYR_VERSION` | `v4.4.0` | Zephyr version for SDK compatibility |
+| `TOOLCHAIN_VERSION` | `1.0.1` | Zephyr SDK version |
 | `TOOLCHAINS` | `arm-zephyr-eabi` | Comma-separated toolchain list or "all" |
 
 ### 🏗️ Available Toolchains
@@ -82,7 +82,7 @@ docker run -it --rm -v $(pwd):/home/zephyr/workspace ghcr.io/tobiwan88/zephyr_do
 
 # Inside container
 source ~/.venv/bin/activate
-west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.2.0 myproject
+west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.0 myproject
 cd myproject && west update
 west build -b qemu_x86 zephyr/samples/hello_world
 ```
