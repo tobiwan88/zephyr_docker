@@ -4,8 +4,8 @@
 # Efficient multi-stage build with shallow cloning and selective toolchains
 
 ARG DEBIAN_VERSION=trixie-slim
-ARG ZEPHYR_VERSION=v4.3.0
-ARG TOOLCHAIN_VERSION=0.17.4
+ARG ZEPHYR_VERSION=v4.4.0
+ARG TOOLCHAIN_VERSION=1.0.1
 ARG TOOLCHAINS=arm-zephyr-eabi
 
 # Multi-stage build for size optimization
@@ -90,7 +90,7 @@ RUN set -ex && \
     west zephyr-export && \
     west packages pip --install && \
     # Install Zephyr SDK
-    west sdk install --version ${TOOLCHAIN_VERSION} --install-dir /home/zephyr/zephyr-sdk --toolchains ${TOOLCHAINS} -H && \
+    west sdk install --version ${TOOLCHAIN_VERSION} --install-dir /home/zephyr/zephyr-sdk --gnu-toolchains ${TOOLCHAINS} -H && \
     # Immediately cleanup the workspace to save space
     cd /home/zephyr && \
     rm -rf zephyrproject && \

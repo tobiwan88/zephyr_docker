@@ -11,12 +11,12 @@ on:
       zephyr_version:
         description: 'Zephyr version to build'
         required: false
-        default: 'v4.3.0'
+        default: 'v4.4.0'
         type: string
       toolchain_version:
         description: 'Toolchain version to build'
         required: false
-        default: '0.17.4'
+        default: '1.0.1'
         type: string
       debian_version:
         description: 'Debian base version'
@@ -123,8 +123,8 @@ jobs:
       - name: Set build environment
         id: vars
         run: |
-          ZEPHYR_VERSION="${{ github.event.inputs.zephyr_version || 'v4.3.0' }}"
-          TOOLCHAIN_VERSION="${{ github.event.inputs.toolchain_version || '0.17.4' }}"
+          ZEPHYR_VERSION="${{ github.event.inputs.zephyr_version || 'v4.4.0' }}"
+          TOOLCHAIN_VERSION="${{ github.event.inputs.toolchain_version || '1.0.1' }}"
           DEBIAN_VERSION="${{ github.event.inputs.debian_version || 'trixie-slim' }}"
           TOOLCHAINS="${{ matrix.toolchain }}"
 
